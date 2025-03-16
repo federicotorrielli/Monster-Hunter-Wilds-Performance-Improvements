@@ -7,3 +7,7 @@ My personal script/mod collection to improve MHWilds Performance on PC
 2. Direct Storage Upgrade (dstorage.dll/dstoragecore.dll) - Fixes stuttering while rotating the camera
 3. [Persistent Buff Glow Removal](https://www.nexusmods.com/monsterhunterwilds/mods/141)
 4. [Disable Post Processing Effects](https://www.nexusmods.com/monsterhunterwilds/mods/221)
+
+## Mods that I can't upload
+
+[DLSS Swapper](https://github.com/beeradmoore/dlss-swapper) to the latest DLSS 4 version
