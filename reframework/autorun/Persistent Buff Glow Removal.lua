@@ -1,13 +1,13 @@
 log.info("[Persistent Buff Glow Removal] started loading")
 
-local showDebug = FALSE
+local showDebug = false
 local context = nil
 
 local configPath = "Persistent_Buff_Glow_Removal_Config.json"
 local drawOptionsWindow = false
 
 local config = {
-	version = "1.0.3",
+	version = "1.0.5",
 	suppressAllEffectLoops = false,
 	hideAllEffectLoops = false,
 	blockEffects = {
@@ -84,28 +84,59 @@ local config = {
 		["34603246"] = false,
 		["34603247"] = false,
 		["34603248"] = false
+		},
+	blockBadConditionMesh = {
+		["0"] = false, --Fire
+		["1"] = false, --Dragon
+		["2"] = false, --Debuff?
+		["3"] = false, --Ice
+		["4"] = false, --Tear?
+		["5"] = false, --Poison
+		["6"] = false, --Frozen
+		["7"] = false --Virus
 		}
 	}
 
 local function fixConfig() --well, FALSES can be ignored
 	if config.version == "1.0.0" then
-		config.version = "1.0.3"
+		config.version = "1.0.5"
 		config.blockEffects["34996523"] = true
 		config.blockBodyEffects = {
 			["34013268"] = false
+			}
+		config.blockBadConditionMesh = {
+			["0"] = false
 			}
 		json.dump_file(configPath, config)
 	elseif config.version == "1.0.1" then
-		config.version = "1.0.3"
+		config.version = "1.0.5"
 		config.blockEffects["34996523"] = true
 		config.blockBodyEffects = {
 			["34013268"] = false
 			}
+		config.blockBadConditionMesh = {
+			["0"] = false
+			}
 		json.dump_file(configPath, config)
 	elseif config.version == "1.0.2" then
-		config.version = "1.0.3"
+		config.version = "1.0.5"
 		config.blockBodyEffects = {
 			["34013268"] = false
+			}
+		config.blockBadConditionMesh = {
+			["0"] = false
+			}
+		json.dump_file(configPath, config)
+	elseif config.version == "1.0.3" then
+		config.version = "1.0.5"
+		config.blockBadConditionMesh = {
+			["0"] = false
+			}
+		json.dump_file(configPath, config)
+	elseif config.version == "1.0.4" then
+		config.version = "1.0.5"
+		config.blockBadConditionMesh = {
+			["0"] = false
 			}
 		json.dump_file(configPath, config)
 	end
@@ -156,11 +187,13 @@ function(args) --allow new effects through, then block them
 	local HunterID = sdk.to_int64(Hunter:call("get_StableMemberIndex()"))
 	local EffectID = sdk.to_int64(args[3])
 	--logDebug("BEFL:"..tostring(HunterID)..":"..tostring(EffectID)..":"..tostring(config.blockBodyEffects[tostring(EffectID)]))
-	if (config.blockBodyEffects[tostring(EffectID)] or config.suppressAllEffectLoops) then
+	if config.hideAllEffectLoops then
+		args[3] = 0
+	elseif (config.blockBodyEffects[tostring(EffectID)] or config.suppressAllEffectLoops) then
 		if haveSeenBodyEffect[HunterID] == nil then 
 			haveSeenBodyEffect[HunterID] = {[0] = -1} --empty arrays go poof
 		end
-		logDebug(tostring(haveSeenBodyEffect[HunterID][EffectID]))
+		--logDebug(tostring(haveSeenBodyEffect[HunterID][EffectID]))
 		if haveSeenBodyEffect[HunterID][EffectID] == nil or haveSeenBodyEffect[HunterID][EffectID] == 0 then
 			haveSeenBodyEffect[HunterID][EffectID] = 20
 		else
@@ -185,13 +218,39 @@ function(retval)
 end
 )
 
-sdk.hook(sdk.find_type_definition("app.cHunterEffect"):get_method("playEffectLoop(app.EffectID_Common.ID, System.UInt64, via.GameObject, app.cEffectOverwriteParams)"),
+sdk.hook(sdk.find_type_definition("app.cEffectController"):get_method("playEffectLoopCore(System.UInt32, app.EffectID_Common.ID, System.UInt64, via.GameObject, app.cEffectOverwriteParams, via.GameObject)"),
 function(args)
-	if config.blockEffects[tostring(sdk.to_int64(args[3]))] or config.hideAllEffectLoops then
-		args[3] = 0
+	if config.blockEffects[tostring(sdk.to_int64(args[4]))] or config.hideAllEffectLoops then
+		args[4] = 0
 	end
 end,
 function(retval)
+	return retval;
+end
+)
+
+sdk.hook(sdk.find_type_definition("app.CharacterBadConditioinVisualManager"):get_method("getVirusRate(app.cBadConditionVisualPriorityManager.ExtContidion, app.CharacterBadConditioinVisualManager.PartsIndex)"),
+function(args)
+	
+end,
+function(retval)
+	if config.blockEffects["FRENZYMESH"] then
+		return 0
+	end
+	return retval;
+end
+)
+
+sdk.hook(sdk.find_type_definition("app.cBadConditionVisualPriorityManager"):get_method("getElement(System.Int32)"),
+function(args)
+	
+end,
+function(retval)
+	local Element = sdk.to_managed_object(retval)
+	if config.blockBadConditionMesh[tostring(Element:get_field("_Idx"))] then
+		Element:set_field("_Rate", 0)
+		return sdk.to_ptr(Element)
+	end
 	return retval;
 end
 )
@@ -203,42 +262,150 @@ re.on_draw_ui(function()
 	
     if drawOptionsWindow then
         if imgui.begin_window("Persistent Buff Glow Removal Options##Suppressed_Buff_Glow", true, 64) then
-			if imgui.tree_node("Item Buff Effects##Suppressed_Buff_Glow") then
-				changed, value = imgui.checkbox('Hide Healing Loop (Potions, Mantle, etc.) [Hunter Glow]##Suppressed_Buff_Glow', config.blockEffects["33816597"])
-				if changed then
-					doWrite = true
-					config.blockEffects["33816597"] = value
+			if imgui.tree_node("Item and Skill Buff Effects##Suppressed_Buff_Glow") then
+				if imgui.tree_node("Generic Buffs##Suppressed_Buff_Glow") then
+					changed, value = imgui.checkbox('Hide Healing Loop (Potions, Mantle, etc.) [Hunter Glow]##Suppressed_Buff_Glow', config.blockEffects["33816597"])
+					if changed then
+						doWrite = true
+						config.blockEffects["33816597"] = value
+					end
+					changed, value = imgui.checkbox('Hide Attack Boost [Hunter Glow]##Suppressed_Buff_Glow', config.blockEffects["33816602"])
+					if changed then
+						doWrite = true
+						config.blockEffects["33816602"] = value
+					end
+					changed, value = imgui.checkbox('Hide Defense Boost [Hunter Glow]##Suppressed_Buff_Glow', config.blockEffects["33816604"])
+					if changed then
+						doWrite = true
+						config.blockEffects["33816604"] = value
+					end
+					changed, value = imgui.checkbox('Hide Stamina Boost [Hunter Glow]##Suppressed_Buff_Glow', config.blockEffects["33816600"])
+					if changed then
+						doWrite = true
+						config.blockEffects["33816600"] = value
+					end
+					imgui.tree_pop()
 				end
-				changed, value = imgui.checkbox('Hide Attack Boost [Hunter Glow]##Suppressed_Buff_Glow', config.blockEffects["33816602"])
-				if changed then
-					doWrite = true
-					config.blockEffects["33816602"] = value
+				if imgui.tree_node("Item Buffs##Suppressed_Buff_Glow") then
+					changed, value = imgui.checkbox('Hide Heat/Cold Drink [Hunter Glow]##Suppressed_Buff_Glow', config.blockEffects["33816608"])
+					if changed then
+						doWrite = true
+						config.blockEffects["33816608"] = value
+						config.blockEffects["33816610"] = value
+					end
+					changed, value = imgui.checkbox('Hide Immunizer Buff [Hunter Glow]##Suppressed_Buff_Glow', config.blockEffects["33816606"])
+					if changed then
+						doWrite = true
+						config.blockEffects["33816606"] = value
+					end
+					changed, value = imgui.checkbox('Hide Corrupted Mantle Buff [Hunter Glow]##Suppressed_Buff_Glow', config.blockEffects["34996523"])
+					if changed then
+						doWrite = true
+						config.blockEffects["34996523"] = value
+					end
+					imgui.tree_pop()
 				end
-				changed, value = imgui.checkbox('Hide Defense Boost [Hunter Glow]##Suppressed_Buff_Glow', config.blockEffects["33816604"])
-				if changed then
-					doWrite = true
-					config.blockEffects["33816604"] = value
-				end
-				changed, value = imgui.checkbox('Hide Stamina Boost [Hunter Glow]##Suppressed_Buff_Glow', config.blockEffects["33816600"])
-				if changed then
-					doWrite = true
-					config.blockEffects["33816600"] = value
-				end
-				changed, value = imgui.checkbox('Hide Heat/Cold Drink [Hunter Glow]##Suppressed_Buff_Glow', config.blockEffects["33816608"])
-				if changed then
-					doWrite = true
-					config.blockEffects["33816608"] = value
-					config.blockEffects["33816610"] = value
-				end
-				changed, value = imgui.checkbox('Hide Immunizer Buff [Hunter Glow]##Suppressed_Buff_Glow', config.blockEffects["33816606"])
-				if changed then
-					doWrite = true
-					config.blockEffects["33816606"] = value
-				end
-				changed, value = imgui.checkbox('Hide Corrupted Mantle Buff [Hunter Glow]##Suppressed_Buff_Glow', config.blockEffects["34996523"])
-				if changed then
-					doWrite = true
-					config.blockEffects["34996523"] = value
+				if imgui.tree_node("Skill Buffs##Suppressed_Buff_Glow") then
+					changed, value = imgui.checkbox("Hide 'Common' Skills [Hunter Flashes]##Suppressed_Buff_Glow", config.blockEffects["35127600"])
+					imgui.text("   Affects multiple Skills: Adrenaline Rush, Burst, Counterstrike, Maximum Might")
+					if changed then
+						doWrite = true
+						config.blockEffects["35127600"] = value
+					end
+					changed, value = imgui.checkbox('Hide Latent Power Skill [Hunter Flash]##Suppressed_Buff_Glow', config.blockEffects["35127601"])
+					if changed then
+						doWrite = true
+						config.blockEffects["35127601"] = value
+					end
+					-- changed, value = imgui.checkbox('Hide PL_SKILL_KAZIBA Skill [Hunter Flash]##Suppressed_Buff_Glow', config.blockEffects["35127602"])
+					-- if changed then
+						-- doWrite = true
+						-- config.blockEffects["35127602"] = value
+					-- end
+					changed, value = imgui.checkbox('Hide Resentment Skill [Hunter Flash]##Suppressed_Buff_Glow', config.blockEffects["35127603"])
+					if changed then
+						doWrite = true
+						config.blockEffects["35127603"] = value
+					end
+					changed, value = imgui.checkbox('Hide Agitator Skill [Hunter Flash]##Suppressed_Buff_Glow', config.blockEffects["35127604"])
+					if changed then
+						doWrite = true
+						config.blockEffects["35127604"] = value
+					end
+					changed, value = imgui.checkbox('Hide Peak Performance Skill [Hunter Flash]##Suppressed_Buff_Glow', config.blockEffects["35127605"])
+					if changed then
+						doWrite = true
+						config.blockEffects["35127605"] = value
+					end
+					-- changed, value = imgui.checkbox('Hide PL_SKILL_KATSU Skill [Hunter Flash]##Suppressed_Buff_Glow', config.blockEffects["35127606"])
+					-- if changed then
+						-- doWrite = true
+						-- config.blockEffects["35127606"] = value
+					-- end
+					changed, value = imgui.checkbox('Hide Divine Blessing Skill [Hunter Flash]##Suppressed_Buff_Glow', config.blockEffects["35127607"])
+					if changed then
+						doWrite = true
+						config.blockEffects["35127607"] = value
+					end
+					-- changed, value = imgui.checkbox('Hide PL_SKILL_GUTS Skill [Hunter Flash]##Suppressed_Buff_Glow', config.blockEffects["35127608"])
+					-- if changed then
+						-- doWrite = true
+						-- config.blockEffects["35127608"] = value
+					-- end
+					-- changed, value = imgui.checkbox('Hide PL_SKILL_HUNKI Skill [Hunter Flash]##Suppressed_Buff_Glow', config.blockEffects["35127609"])
+					-- if changed then
+						-- doWrite = true
+						-- config.blockEffects["35127609"] = value
+					-- end
+					-- changed, value = imgui.checkbox('Hide PL_SKILL_HUKUTU Skill [Hunter Flash]##Suppressed_Buff_Glow', config.blockEffects["35127610"])
+					-- if changed then
+						-- doWrite = true
+						-- config.blockEffects["35127610"] = value
+					-- end
+					-- changed, value = imgui.checkbox('Hide PL_SKILL_RYUNYU Skill [Hunter Flash]##Suppressed_Buff_Glow', config.blockEffects["35127611"])
+					-- if changed then
+						-- doWrite = true
+						-- config.blockEffects["35127611"] = value
+					-- end
+					-- changed, value = imgui.checkbox('Hide PL_SKILL_ELEMENT_CONVERT Skill [Hunter Flash]##Suppressed_Buff_Glow', config.blockEffects["35127612"])
+					-- if changed then
+						-- doWrite = true
+						-- config.blockEffects["35127612"] = value
+					-- end
+					-- changed, value = imgui.checkbox('Hide PL_SKILL_ASSAULT_SHOT Skill [Hunter Flash]##Suppressed_Buff_Glow', config.blockEffects["35127613"])
+					-- if changed then
+						-- doWrite = true
+						-- config.blockEffects["35127613"] = value
+					-- end
+					-- changed, value = imgui.checkbox('Hide PL_SKILL_FIRST_SHOT Skill [Hunter Flash]##Suppressed_Buff_Glow', config.blockEffects["35127614"])
+					-- if changed then
+						-- doWrite = true
+						-- config.blockEffects["35127614"] = value
+					-- end
+					changed, value = imgui.checkbox('Hide Offensive Guard Skill [Hunter Flash]##Suppressed_Buff_Glow', config.blockEffects["35127616"])
+					if changed then
+						doWrite = true
+						config.blockEffects["35127616"] = value
+					end
+					changed, value = imgui.checkbox('Hide Convert Element Skill [Weapon Sparks]##Suppressed_Buff_Glow', config.blockEffects["35127615"])
+					if changed then
+						doWrite = true
+						config.blockEffects["35127615"] = value
+						for n = 35127617,35127631,1 do
+							config.blockEffects[tostring(n)] = value
+						end
+					end
+					-- changed, value = imgui.checkbox('Hide PL_SKILL_RYUKI_ADD Skill [Hunter Flash]##Suppressed_Buff_Glow', config.blockEffects["35127632"])
+					-- if changed then
+						-- doWrite = true
+						-- config.blockEffects["35127632"] = value
+					-- end
+					-- changed, value = imgui.checkbox('Hide PL_SKILL_RYUKI Skill [Hunter Flash]##Suppressed_Buff_Glow', config.blockEffects["35127633"])
+					-- if changed then
+						-- doWrite = true
+						-- config.blockEffects["35127633"] = value
+					-- end
+					imgui.tree_pop()
 				end
 				imgui.tree_pop()
 			end
@@ -424,7 +591,7 @@ re.on_draw_ui(function()
 				end
 				imgui.tree_pop()
 			end
-			if imgui.tree_node("Frenzy Effects##Suppressed_Buff_Glow") then
+			if imgui.tree_node("Debuff Effects##Suppressed_Buff_Glow") then
 				changed, value = imgui.checkbox('Hide Frenzy: Onset [Hunter Glow, Smoke, Sound]##Suppressed_Buff_Glow', config.blockEffects["33882171"])
 				if changed then
 					doWrite = true
@@ -440,15 +607,75 @@ re.on_draw_ui(function()
 					doWrite = true
 					config.blockEffects["33882173"] = value
 				end
+				changed, value = imgui.checkbox('Hide Frenzy: Corruption [Hunter Texture]##Suppressed_Buff_Glow', config.blockBadConditionMesh["7"])
+				if changed then
+					doWrite = true
+					config.blockBadConditionMesh["7"] = value
+				end
+				changed, value = imgui.checkbox('Hide Blastblight: Sparks [Hunter Effect]##Suppressed_Buff_Glow', config.blockEffects["33882159"])
+				if changed then
+					doWrite = true
+					config.blockEffects["33882159"] = value
+					config.blockEffects["33882160"] = value
+				end
+				changed, value = imgui.checkbox('Hide Dragonblight: Sparks [Hunter Effect]##Suppressed_Buff_Glow', config.blockEffects["33882157"])
+				if changed then
+					doWrite = true
+					config.blockEffects["33882157"] = value
+				end
+				changed, value = imgui.checkbox('Hide Dragonblight: Corruption [Hunter Texture]##Suppressed_Buff_Glow', config.blockBadConditionMesh["1"])
+				if changed then
+					doWrite = true
+					config.blockBadConditionMesh["1"] = value
+				end
+				changed, value = imgui.checkbox('Hide Fireblight: Flames [Hunter Effect]##Suppressed_Buff_Glow', config.blockEffects["33882152"])
+				if changed then
+					doWrite = true
+					config.blockEffects["33882152"] = value
+				end
+				changed, value = imgui.checkbox('Hide Fireblight: Burns [Hunter Texture]##Suppressed_Buff_Glow', config.blockBadConditionMesh["0"])
+				if changed then
+					doWrite = true
+					config.blockBadConditionMesh["0"] = value
+				end
+				changed, value = imgui.checkbox('Hide Poison: Smoke [Hunter Effect]##Suppressed_Buff_Glow', config.blockEffects["33882148"])
+				if changed then
+					doWrite = true
+					config.blockEffects["33882148"] = value
+				end
+				changed, value = imgui.checkbox('Hide Poison: Corruption [Hunter Texture]##Suppressed_Buff_Glow', config.blockBadConditionMesh["5"])
+				if changed then
+					doWrite = true
+					config.blockBadConditionMesh["5"] = value
+				end
+				changed, value = imgui.checkbox('Hide Thunderblight: Sparks [Hunter Effect]##Suppressed_Buff_Glow', config.blockEffects["33882155"])
+				if changed then
+					doWrite = true
+					config.blockEffects["33882155"] = value
+				end
+				changed, value = imgui.checkbox('Hide Waterblight: Soaked [Hunter Effect]##Suppressed_Buff_Glow', config.blockEffects["33882154"])
+				if changed then
+					doWrite = true
+					config.blockEffects["33882154"] = value
+				end
 				imgui.tree_pop()
 			end
 			if imgui.tree_node("Other##Suppressed_Buff_Glow") then
-				imgui.text("Not much tested; just hides everything that goes through the 'cHunterEffect' loop functions.")
+				changed, value = imgui.checkbox('Hide Monster Wounds [Glow in Focus and Mount]##Suppressed_Buff_Glow', config.blockEffects["137822824"])
+				if changed then
+					doWrite = true
+					for n = 137822824,137822828,1 do
+						config.blockEffects[tostring(n)] = value
+					end
+					config.blockEffects["137953907"] = value
+					config.blockEffects["137953908"] = value
+				end
 				changed, value = imgui.checkbox('Hide Everything the Glows Touch [Glow, Sound, Etc.]##Suppressed_Buff_Glow', config.hideAllEffectLoops)
 				if changed then
 					doWrite = true
 					config.hideAllEffectLoops = value
 				end
+				imgui.text("   Not much tested; just hides everything that goes through the 'cHunterEffect' loop functions.")
 				imgui.tree_pop()
 			end
 			if doWrite then
